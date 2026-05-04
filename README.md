@@ -1,55 +1,51 @@
 # Structured ASIC SA Placer
 
-This repository currently contains the Person 1 foundation for the placement
-project: netlist parsing, fabric generation, perimeter blocking, and fixed-pin
-placement.
+Team project for a simulated-annealing placer on a structured ASIC grid.  
+My part was the groundwork: read the netlists, build the fabric (the repeating  
+5x5 tile pattern), keep the perimeter for pins only, and load everything into  
+a grid object my teammate can plug their placement logic into.
 
-## Requirements
+You need Python 3.10+ installed. No extra pip packages for what I have so far.
 
-- Python 3.10 or newer
+## How I run it
 
-No third-party packages are required for the Person 1 parser/fabric demo.
+There is not a separate `main` script yet—I just use Python from the project folder.
 
-## Run
-
-Parse a design and print the loaded grid:
-
-```bash
-python3 placer.py design_1_small.txt
-```
-
-Print only the validation summary:
+Print the board after loading a design:
 
 ```bash
-python3 placer.py design_1_small.txt --no-grid
+python3 -c "from placer import parse_netlist; g = parse_netlist('design_1_small.txt'); print(g.render())"
 ```
 
-## What The Demo Checks
+Quick sanity check without dumping the whole grid (counts and that it did not blow up):
 
-The loader validates that:
+```bash
+python3 -c "from placer import parse_netlist; g = parse_netlist('design_1_small.txt'); print(g.num_cells, 'cells', g.num_nets, 'nets', g.ny, 'x', g.nx, 'grid')"
+```
 
-- The header count matches the number of component and net lines.
-- Fixed pins are placed only on the one-cell perimeter.
-- Movable cells use valid types: `T0`, `T1`, `T2`, or `T3`.
-- Every net references known component IDs.
-- The generated core has enough legal sites for each cell type.
+Swap `design_1_small.txt` for any of the other `design_*.txt` files in the repo.
 
-The console grid uses:
+## What actually gets checked
 
-- `P` for fixed pins.
-- `0`, `1`, `2`, and `3` for legal core site types.
-- `.` for empty perimeter locations.
+When you call `parse_netlist`, it walks the file and complains if something is off:  
+line counts have to match the header, pins have to sit on the outer ring only,  
+cell lines have to be `T0`–`T3`, every net has to point at real component ids,  
+and there have to be enough core sites of each type for how many cells of that  
+type the design asks for.
 
-## Team Handoff
+If you print `g.render()`, pins show as `P`, core site types as `0`–`3`, and  
+empty perimeter slots as `.` (dots).
 
-Person 2 can import `parse_netlist` from `placer.py` and receive a fully loaded
-`Grid` object:
+## For my teammate
+
+If you are doing placement or cost on top of this, import the loader and you get  
+a full `Grid` back—sites, components, nets are all wired up:
 
 ```python
 from placer import parse_netlist
 
 grid = parse_netlist("design_1_small.txt")
+# grid.sites, grid.components, grid.nets — go wild
 ```
 
-The `Grid` object owns the generated sites, all `Component` objects, and all
-`Net` connectivity data.
+That is the handoff from my side.
