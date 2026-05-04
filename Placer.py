@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 valid_cell_types = {"T0", "T1", "T2", "T3"}
 
@@ -124,10 +124,7 @@ class grid:
     def validate_capacity(self) -> None:
         capacity = self.core_capacity_by_type()
         demand = self.movable_cells_by_type()
-        for cell_type in sorted(VALID_CELL_TYPES):
+        for cell_type in sorted(valid_cell_types):
             if demand[cell_type] > capacity[cell_type]:
                 raise netlist_editor(f"not enough {cell_type} core sites: need {demand[cell_type]}, have {capacity[cell_type]}.")
 
-    
-
-            
