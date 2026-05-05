@@ -87,11 +87,12 @@ def main() -> int:
 
     print(f"SA stats: accepted={accepted}, rejected={rejected}")
     print(f"HPWL after SA:  {hpwl_after} (SA returned {final_cost})")
-
+    print_summary(g, args.netlist,1)
+    '''
     if args.show_grid:
         print("\nFinal grid:")
         print(g.render())
-    
+    '''
     return 0
 
 
