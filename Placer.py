@@ -88,11 +88,9 @@ class grid:
         return cls(num_cells=num_cells, num_nets=num_nets, ny=ny, nx=nx, num_fixed_pins=num_fixed_pins, sites=sites, components={}, nets=[])
 
     def site_at(self, x: int, y: int) -> site:
-        if(self.ny is not None and self.nx is not None):
-            if(x is not None and y is not None):
-                if not (0 <= x < self.nx and 0 <= y < self.ny):
-                    raise netlist_error(f"site at ({x}, {y}) is outside the grids")
-                return self.sites[y][x]
+        if not (0 <= x < self.nx and 0 <= y < self.ny):
+            raise netlist_error(f"site at ({x}, {y}) is outside the grids")
+        return self.sites[y][x]
 
     def is_perimeter_coord(self, x: int, y: int) -> bool:
         return x == 0 or y == 0 or x == self.nx - 1 or y == self.ny - 1
@@ -164,9 +162,9 @@ class grid:
 
         if site.fixed_pin_id is not None:
             raise netlist_error(f"Cannot place a cell on pin site ({x}, {y}).")
-
-        if site.site_type != component.cell_type:
-            raise netlist_error(f"Cell {cell_id} type {component.cell_type} cannot sit on " f"site type {site.site_type} at ({x}, {y}).")
+        
+        # if site.site_type != component.cell_type:
+        #     raise netlist_error(f"Cell {cell_id} type {component.cell_type} cannot sit on " f"site type {site.site_type} at ({x}, {y}).")
 
         if site.cell_id is not None and site.cell_id != cell_id:
             raise netlist_error(f"Site ({x}, {y}) already holds cell {site.cell_id}.")
@@ -333,7 +331,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("netlist", type=Path, help="Path to a design_*.txt netlist file.")
     parser.add_argument("--no-grid", action="store_true", help="Skip ASCII grid output.")
     return parser
-'''
+
 def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
@@ -346,4 +344,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-    '''
