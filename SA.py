@@ -1,17 +1,19 @@
 import math 
 import random
-from placer import Grid
+from Placer import grid
+from initialPlacement import total_hpwl, swap
 from collections import defaultdict
 
-num_cells = Grid.num_cells
-num_nets = Grid.num_nets
-initial_cost = hpwl(cells) #implemented by Haya 
-T = 500*initial_cost
-T_fin = (5e5 * initial_cost) / num_nets
-num_moves = 20*num_cells
 
-def SA_loop(CR):
-    cells = Grid.movable_cells()
+
+def SA_loop(CR, g):
+    num_cells = g.num_cells
+    num_nets = g.num_nets
+    initial_cost = total_hpwl(g) #implemented by Haya 
+    T = 500*initial_cost
+    T_fin = (5e5 * initial_cost) / num_nets
+    num_moves = 20*num_cells
+    cells = g.movable_cells()
     cells_by_type = defaultdict(list)
     for cell in cells:
         cells_by_type[cell.cell_type].append(cell)
@@ -30,23 +32,25 @@ def SA_loop(CR):
                 continue
 
             cell2 = random.choice(same_type_cells)
-            delta_cost = swap_cells(cell1, cell2) #implemented by Haya
+            swap(cell1, cell2, g) #implemented by Haya
+            new_cost = total_hpwl(g) #implemented by Haya
+            delta_cost = new_cost - current_cost
 
             if delta_cost < 0:
-                current_cost += delta_cost
+                current_cost += new_cost
                 accepted_moves += 1
 
             else:
                 p = math.exp(-delta_cost / T)
 
                 if random.random() < p:
-                    current_cost += delta_cost
+                    current_cost += new_cost
                     accepted_moves += 1
 
                 else:
-                    swap_cells(cell2, cell1) #revert the swap
+                    swap(cell1, cell2, g) #revert the swap
                     rejected_moves += 1
-                    
+
         T*= CR
     
     return current_cost, accepted_moves, rejected_moves
