@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 from collections import Counter, defaultdict
+import argparse
+from pathlib import Path
 
 valid_cell_types = {"T0", "T1", "T2", "T3"}
 
@@ -195,7 +197,132 @@ class grid:
             rows.append(''.join(chars))
         return '\n'.join(rows)
 
-        
+def strip_inline_comment(line: str) -> str:
+    line = line.split("#", 1)[0]
+    line = line.split("(", 1)[0]
+    return line.strip()
 
+def read_tokens(path: Path) -> list[list[str]]:
+    token_lines: list[list[str]] = []
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        clean_line = strip_inline_comment(raw_line)
+        if clean_line:
+            token_lines.append(clean_line.split())
+        elif raw_line.strip() and not raw_line.lstrip().startswith(("#", "(")):
+            raise netlist_error(f"Line {line_number} became empty after comment stripping.")
+    return token_lines
 
+def parse_int(token: str, context: str) -> int:
+    try:
+        return int(token)
+    except ValueError as exc:
+        raise netlist_error(f"Expected integer for {context}, got {token!r}.") from exc
 
+def parse_netlist(path: str | Path) -> Grid:
+    input_path = Path(path)
+    token_lines = read_tokens(input_path)
+    if not token_lines:
+        raise netlist_error(f"{input_path} is empty.")
+    header = token_lines[0]
+    if len(header) != 5:
+        raise netlist_error("Header must contain: NumCells NumNets ny nx NumFixedPins.")
+
+    num_cells   = parse_int(header[0], "NumCells")
+    num_nets    = parse_int(header[1], "NumNets")
+    ny          = parse_int(header[2], "ny")
+    nx          = parse_int(header[3], "nx")
+    num_fixed_pins = parse_int(header[4], "NumFixedPins")
+
+    if num_cells < 0 or num_nets < 0 or num_fixed_pins < 0:
+        raise netlist_error("Header counts cannot be negative.")
+    if num_fixed_pins > num_cells:
+        raise netlist_error("NumFixedPins cannot exceed NumCells.")
+
+    expected_lines = 1 + num_cells + num_nets
+
+    if len(token_lines) != expected_lines:
+        raise netlist_error(f"Expected {expected_lines} non-empty data lines, found {len(token_lines)}.")
+
+    grid = grid.create_empty(num_cells, num_nets, ny, nx, num_fixed_pins)
+
+    for index, tokens in enumerate(token_lines[1 : 1 + num_cells]):
+        if index < num_fixed_pins:
+            if len(tokens) != 4 or tokens[3] != "P":
+                raise netlist_error(f"Fixed pin line {index + 2} must be: ID X Y P.")
+            cid = parse_int(tokens[0], "pin ID")
+            x   = parse_int(tokens[1], f"pin {cid} x")
+            y   = parse_int(tokens[2], f"pin {cid} y")
+            comp = component(component_id=cid, kind="pin", x=x, y=y)
+            grid.add_component(comp)
+            grid.place_fixed_pin(comp)
+
+        else:
+            if len(tokens) != 2:
+                raise netlist_error(f"Movable cell line {index + 2} must be: ID Type.")
+
+            cid = parse_int(tokens[0], "cell ID")
+            cell_type = tokens[1]
+
+            if cell_type not in valid_cell_types:
+                raise netlist_error(f"Cell {cid} has invalid type {cell_type!r}; expected T0, T1, T2, or T3.")
+
+            grid.add_component(component(component_id=cid, kind="cell", cell_type=cell_type))
+
+    for net_id, tokens in enumerate(token_lines[1 + num_cells:]):
+        if not tokens:
+            raise netlist_error(f"Net line {net_id + 2 + num_cells} is empty.")
+
+        num_attached = parse_int(tokens[0], f"net {net_id} attachment count")
+        attached_ids = tuple(parse_int(t, f"net {net_id} component ID") for t in tokens[1:])
+
+        if num_attached != len(attached_ids):
+            raise netlist_error(f"Net {net_id} declares {num_attached} attachments but lists {len(attached_ids)} IDs.")
+
+        if num_attached < 1:
+            raise netlist_error(f"Net {net_id} must attach at least one component.")
+
+        missing = [cid for cid in attached_ids if cid not in grid.components]
+
+        if missing:
+            raise netlist_error(f"Net {net_id} references unknown component IDs: {missing}.")
+
+        grid.nets.append(net(net_id=net_id, component_ids=attached_ids))
+
+    grid.validate_capacity()
+    return grid
+
+def format_counter(counter: Counter[str], keys: Iterable[str]) -> str:
+    return ", ".join(f"{key}: {counter[key]}" for key in keys)
+
+def print_summary(grid: grid, source: Path, show_grid: bool) -> None:
+    print(f"Loaded: {source}")
+    print(
+        f"Header: components={grid.num_cells}, nets={grid.num_nets}, "
+        f"grid={grid.ny}x{grid.nx}, fixed_pins={grid.num_fixed_pins}"
+    )
+    print(f"Movable cells by type: {format_counter(grid.movable_cells_by_type(), sorted(valid_cell_types))}")
+    print(f"Core capacity by type: {format_counter(grid.core_capacity_by_type(), sorted(valid_cell_types))}")
+    print(f"Pins placed on perimeter: {len(grid.fixed_pins())}")
+    print(f"Nets loaded: {len(grid.nets)}")
+    if show_grid:
+        print("\nGrid:")
+        print(grid.render())
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Load a Structured ASIC netlist and print summary.")
+    parser.add_argument("netlist", type=Path, help="Path to a design_*.txt netlist file.")
+    parser.add_argument("--no-grid", action="store_true", help="Skip ASCII grid output.")
+    return parser
+
+def main() -> int:
+    parser = build_arg_parser()
+    args = parser.parse_args()
+    try:
+        grid = parse_netlist(args.netlist)
+    except netlist_error as exc:
+        parser.exit(status=1, message=f"Netlist error: {exc}\n")
+    print_summary(grid, args.netlist, show_grid=not args.no_grid)
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())
