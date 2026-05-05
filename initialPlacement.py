@@ -87,6 +87,23 @@ def swap(component1, component2, grid):
 
 
 def hpwl(net):
-    # Implementation for calculating the half-perimeter wire length of a net
-    pass
+    '''
+    This function calculates the Half Perimeter Wire Length (HPWL) of a given net. 
+    '''
+
+    # Fetch the components connected to the net using their IDs
+    comp_ids = net.component_ids
+    connected_components = [grid.components[comp_id] for comp_id in comp_ids]
+
+    # Determine the net's bounding box by finding the maximum and minimum x and y coordinates of the connected components
+    max_x = max(comp.x for comp in connected_components)
+    min_x = min(comp.x for comp in connected_components)
+    max_y = max(comp.y for comp in connected_components)
+    min_y = min(comp.y for comp in connected_components)
+
+    # Calculate the half-perimeter wire length
+    hpwl = (max_x - min_x) + (max_y - min_y)
+
+    return hpwl
+
 
