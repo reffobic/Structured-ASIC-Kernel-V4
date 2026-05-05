@@ -20,7 +20,7 @@ class netlist_error(ValueError):
     
 @dataclass
 class component:
-    comoponent_id: int
+    component_id: int
     kind: str
     cell_type: str | None = None
     x: int | None = None
@@ -78,7 +78,7 @@ class grid:
         for y in range(ny):
             row: list[site] = []
             for x in range(nx):
-                is_perimeter = x == 0 or y == 0 or y == nx - 1 or y == ny - 1
+                is_perimeter = x == 0 or y == 0 or x == nx - 1 or y == ny - 1
                 site_type = None
                 if not is_perimeter:
                     site_type = master_title[(y-1)%5 ][(x-1)%5]
@@ -113,19 +113,22 @@ class grid:
     def movable_cells_by_type(self) -> Counter[str]:
         return Counter(c.cell_type for c in self.components.values() if c.is_cell and c.cell_type)
 
-    def net_at(self, x: int, y: int) -> net:
+    def net_at(self, net_id: int) -> net:
         if not (0 <= net_id < len(self.nets)):
-            raise netlist_error(f"net at ({x}, {y}) is outside the nets")
+            raise netlist_error(f"Unknown net id {net_id}.")
+
         return self.nets[net_id]
 
     def add_component(self, component: component) -> None:
         if component.component_id in self.components:
             raise netlist_error(f"component {component.component_id} already exists")
+
         self.components[component.component_id] = component
 
     def validate_capacity(self) -> None:
         capacity = self.core_capacity_by_type()
         demand = self.movable_cells_by_type()
+
         for cell_type in sorted(valid_cell_types):
             if demand[cell_type] > capacity[cell_type]:
                 raise netlist_error(f"not enough {cell_type} core sites: need {demand[cell_type]}, have {capacity[cell_type]}.")
@@ -133,28 +136,36 @@ class grid:
     def place_fixed_pin(self, component: component) -> None:
         if component.x is None or component.y is None:
             raise netlist_error(f"pin {component.component_id} is missing coordinates.")
+
         if not self.is_perimeter_coord(component.x, component.y):
             raise netlist_error(f"pin {component.component_id} at ({component.x}, {component.y}) is not on the perimeter.")
+
         site = self.site_at(component.x, component.y)
-        if site.self_at(component.x, component.y).is_blocked:
-            if site.fixed_pin_id is not None:
-                raise netlist_error(f"pin {component.component_id} overlaps pin {site.fixed_pin_id} at ({site.x}, {site.y})")
+
+        if site.fixed_pin_id is not None:
+            raise netlist_error(f"pin {component.component_id} overlaps pin {site.fixed_pin_id} at ({site.x}, {site.y})")
+
         site.fixed_pin_id = component.component_id
 
     def attach_cell_to_at(self, cell_id: int, x: int, y: int) -> None:
-        component = self.components[cell_id]
+        component = self.components.get(cell_id)
+
         if component is None or not component.is_cell:
             raise netlist_error(f"cell {cell_id} is not a valid cell.")
+
         if component.cell_type is None:
             raise netlist_error(f"cell {cell_id} has no cell type.")
 
         site = self.site_at(x, y)
         if site.is_perimeter:
             raise netlist_error(f"site at ({x}, {y}) is on the perimeter.")
+
         if site.fixed_pin_id is not None:
             raise netlist_error(f"Cannot place a cell on pin site ({x}, {y}).")
+
         if site.site_type != component.cell_type:
             raise netlist_error(f"Cell {cell_id} type {component.cell_type} cannot sit on " f"site type {site.site_type} at ({x}, {y}).")
+
         if site.cell_id is not None and site.cell_id != cell_id:
             raise netlist_error(f"Site ({x}, {y}) already holds cell {site.cell_id}.")
             
@@ -174,11 +185,15 @@ class grid:
         component = self.components.get(cell_id)
         if component is None or not component.is_cell:
             raise netlist_error(f"{cell_id} is not a movable design cell id.")
+
         if component.placement_x is None or component.placement_y is None:
             return
+
         old = self.site_at(component.placement_x, component.placement_y)
+
         if old.cell_id == cell_id:
             old.cell_id = None
+
         component.placement_x = None
         component.placement_y = None
 
@@ -204,12 +219,14 @@ def strip_inline_comment(line: str) -> str:
 
 def read_tokens(path: Path) -> list[list[str]]:
     token_lines: list[list[str]] = []
+
     for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         clean_line = strip_inline_comment(raw_line)
         if clean_line:
             token_lines.append(clean_line.split())
         elif raw_line.strip() and not raw_line.lstrip().startswith(("#", "(")):
             raise netlist_error(f"Line {line_number} became empty after comment stripping.")
+
     return token_lines
 
 def parse_int(token: str, context: str) -> int:
@@ -218,12 +235,15 @@ def parse_int(token: str, context: str) -> int:
     except ValueError as exc:
         raise netlist_error(f"Expected integer for {context}, got {token!r}.") from exc
 
-def parse_netlist(path: str | Path) -> Grid:
+def parse_netlist(path: str | Path) -> grid:
     input_path = Path(path)
     token_lines = read_tokens(input_path)
+
     if not token_lines:
         raise netlist_error(f"{input_path} is empty.")
+
     header = token_lines[0]
+
     if len(header) != 5:
         raise netlist_error("Header must contain: NumCells NumNets ny nx NumFixedPins.")
 
@@ -235,6 +255,7 @@ def parse_netlist(path: str | Path) -> Grid:
 
     if num_cells < 0 or num_nets < 0 or num_fixed_pins < 0:
         raise netlist_error("Header counts cannot be negative.")
+
     if num_fixed_pins > num_cells:
         raise netlist_error("NumFixedPins cannot exceed NumCells.")
 
@@ -243,7 +264,7 @@ def parse_netlist(path: str | Path) -> Grid:
     if len(token_lines) != expected_lines:
         raise netlist_error(f"Expected {expected_lines} non-empty data lines, found {len(token_lines)}.")
 
-    grid = grid.create_empty(num_cells, num_nets, ny, nx, num_fixed_pins)
+    g = grid.create_empty(num_cells, num_nets, ny, nx, num_fixed_pins)
 
     for index, tokens in enumerate(token_lines[1 : 1 + num_cells]):
         if index < num_fixed_pins:
@@ -253,8 +274,8 @@ def parse_netlist(path: str | Path) -> Grid:
             x   = parse_int(tokens[1], f"pin {cid} x")
             y   = parse_int(tokens[2], f"pin {cid} y")
             comp = component(component_id=cid, kind="pin", x=x, y=y)
-            grid.add_component(comp)
-            grid.place_fixed_pin(comp)
+            g.add_component(comp)
+            g.place_fixed_pin(comp)
 
         else:
             if len(tokens) != 2:
@@ -266,7 +287,7 @@ def parse_netlist(path: str | Path) -> Grid:
             if cell_type not in valid_cell_types:
                 raise netlist_error(f"Cell {cid} has invalid type {cell_type!r}; expected T0, T1, T2, or T3.")
 
-            grid.add_component(component(component_id=cid, kind="cell", cell_type=cell_type))
+            g.add_component(component(component_id=cid, kind="cell", cell_type=cell_type))
 
     for net_id, tokens in enumerate(token_lines[1 + num_cells:]):
         if not tokens:
@@ -281,32 +302,29 @@ def parse_netlist(path: str | Path) -> Grid:
         if num_attached < 1:
             raise netlist_error(f"Net {net_id} must attach at least one component.")
 
-        missing = [cid for cid in attached_ids if cid not in grid.components]
+        missing = [cid for cid in attached_ids if cid not in g.components]
 
         if missing:
             raise netlist_error(f"Net {net_id} references unknown component IDs: {missing}.")
 
-        grid.nets.append(net(net_id=net_id, component_ids=attached_ids))
+        g.nets.append(net(net_id=net_id, component_ids=attached_ids))
 
-    grid.validate_capacity()
-    return grid
+    g.validate_capacity()
+    return g
 
 def format_counter(counter: Counter[str], keys: Iterable[str]) -> str:
     return ", ".join(f"{key}: {counter[key]}" for key in keys)
 
-def print_summary(grid: grid, source: Path, show_grid: bool) -> None:
+def print_summary(g: grid, source: Path, show_grid: bool) -> None:
     print(f"Loaded: {source}")
-    print(
-        f"Header: components={grid.num_cells}, nets={grid.num_nets}, "
-        f"grid={grid.ny}x{grid.nx}, fixed_pins={grid.num_fixed_pins}"
-    )
-    print(f"Movable cells by type: {format_counter(grid.movable_cells_by_type(), sorted(valid_cell_types))}")
-    print(f"Core capacity by type: {format_counter(grid.core_capacity_by_type(), sorted(valid_cell_types))}")
-    print(f"Pins placed on perimeter: {len(grid.fixed_pins())}")
-    print(f"Nets loaded: {len(grid.nets)}")
+    print(f"Header: components={g.num_cells}, nets={g.num_nets}, "f"grid={g.ny}x{g.nx}, fixed_pins={g.num_fixed_pins}")
+    print(f"Movable cells by type: {format_counter(g.movable_cells_by_type(), sorted(valid_cell_types))}")
+    print(f"Core capacity by type: {format_counter(g.core_capacity_by_type(), sorted(valid_cell_types))}")
+    print(f"Pins placed on perimeter: {len(g.fixed_pins())}")
+    print(f"Nets loaded: {len(g.nets)}")
     if show_grid:
         print("\nGrid:")
-        print(grid.render())
+        print(g.render())
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Load a Structured ASIC netlist and print summary.")
@@ -318,10 +336,10 @@ def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
     try:
-        grid = parse_netlist(args.netlist)
+        g = parse_netlist(args.netlist)
     except netlist_error as exc:
         parser.exit(status=1, message=f"Netlist error: {exc}\n")
-    print_summary(grid, args.netlist, show_grid=not args.no_grid)
+    print_summary(g, args.netlist, show_grid=not args.no_grid)
     return 0
 
 if __name__ == "__main__":
