@@ -1,31 +1,7 @@
-from Placer import parse_netlist
+from Placer import netlist_editor, parse_netlist
 
 # Load the grid from the netlist file - still need to allow user to specify the file name, currently using placeholder
 grid = parse_netlist("design_1_small.txt") 
-
-def legalize(grid):
-    '''
-    This function implements Tetris-Placement Legalization.
-    Legalization criteria:
-    1)Not in the perimeter (already guaranteed by the input)
-    2)The tile type is complementary to the component type 
-    3)Components do not overlap i.e. a component cannot be placed on an occupied site 
-    
-    Placement:
-    Minimum displacement i.e. nearest legal position 
-    '''
-    # Fetch movable components of the passed grid
-    movable_comps = grid.movable_cells()
-
-    for comp in movable_comps:
-        # Check if the component is already in a legal position
-        if grid.site_at(comp.x, comp.y).site_type == comp.cell_type:
-            continue  
-        else:
-            # Find the nearest legal position
-            new_position = find_nearest_legal_pos(comp, grid)
-            # Move the component to the new position
-            move_comp(comp, new_position, grid)
 
 
 # Legalization helper functions ---------------------------------------------------------------------------------------------
@@ -63,11 +39,52 @@ def move_comp(component, new_position, grid):
     component.x, component.y = new_position
 
 # ---------------------------------------------------------------------------------------------------------------------------- 
-    
 
-def swap(component1, component2):
-    # Implementation for swapping two components
-    pass
+
+def legalize(grid):
+    '''
+    This function implements Tetris-Placement Legalization.
+    Legalization criteria:
+    1)Not in the perimeter (already guaranteed by the input)
+    2)The tile type is complementary to the component type 
+    3)Components do not overlap i.e. a component cannot be placed on an occupied site 
+    
+    Placement:
+    Minimum displacement i.e. nearest legal position 
+    '''
+    # Fetch movable components of the passed grid
+    movable_comps = grid.movable_cells()
+
+    for comp in movable_comps:
+        # Check if the component is already in a legal position
+        if grid.site_at(comp.x, comp.y).site_type == comp.cell_type:
+            continue  
+        else:
+            # Find the nearest legal position
+            new_position = find_nearest_legal_pos(comp, grid)
+            # Move the component to the new position
+            move_comp(comp, new_position, grid)
+
+    
+def swap(component1, component2, grid):
+    '''
+    This function swaps the positions of two components on the grid, meant to be used by SA later.
+    '''
+
+    # Store the original positions of the components
+    original_pos1 = (component1.x, component1.y)
+    original_pos2 = (component2.x, component2.y)
+    
+    if(component1.cell_type != component2.cell_type): # Types must match to swap
+        raise netlist_editor("Components must be of the same type to swap")
+    else:
+        # Swap the positions of the two components on the grid
+        grid.site_at(component1.x, component1.y).cell_id = component2.component_id
+        grid.site_at(component2.x, component2.y).cell_id = component1.component_id
+
+        # Update the component objects' positions
+        component1.x, component1.y, component2.x, component2.y = original_pos2[0], original_pos2[1], original_pos1[0], original_pos1[1]
+
 
 def hpwl(net):
     # Implementation for calculating the half-perimeter wire length of a net
