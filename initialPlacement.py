@@ -74,16 +74,18 @@ def swap(component1, component2, grid):
     # Store the original positions of the components
     original_pos1 = (component1.x, component1.y)
     original_pos2 = (component2.x, component2.y)
-    
-    if(component1.cell_type != component2.cell_type): # Types must match to swap
-        raise netlist_editor("Components must be of the same type to swap")
-    else:
-        # Swap the positions of the two components on the grid
-        grid.site_at(component1.x, component1.y).cell_id = component2.component_id
-        grid.site_at(component2.x, component2.y).cell_id = component1.component_id
 
-        # Update the component objects' positions
-        component1.x, component1.y, component2.x, component2.y = original_pos2[0], original_pos2[1], original_pos1[0], original_pos1[1]
+    # SA already validates cells before calling swap 
+    # if(component1.cell_type != component2.cell_type): # Types must match to swap
+    #     raise netlist_editor("Components must be of the same type to swap")
+    # else:
+    
+    # Swap the positions of the two components on the grid
+    grid.site_at(component1.x, component1.y).cell_id = component2.component_id
+    grid.site_at(component2.x, component2.y).cell_id = component1.component_id
+
+    # Update the component objects' positions
+    component1.x, component1.y, component2.x, component2.y = original_pos2[0], original_pos2[1], original_pos1[0], original_pos1[1]
 
 
 def hpwl(net):
