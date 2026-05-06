@@ -1,10 +1,12 @@
 from __future__ import annotations
+from ast import For
 from dataclasses import dataclass
 from typing import Iterable
 from collections import Counter, defaultdict
 import argparse
 from pathlib import Path
 
+# Data structures andlogic for netlist parsing and grid setup
 valid_cell_types = {"T0", "T1", "T2", "T3"}
 
 master_title = [
@@ -15,9 +17,13 @@ master_title = [
     ["T0", "T0", "T0", "T0", "T0"],
 ]
 
+
 class netlist_error(ValueError):
-    """thats when a netlist is not valid or doesnot have the project rules"""
-    
+    '''
+    For when a netlist is not valid or does not follow the project rules
+    '''
+
+
 @dataclass
 class component:
     component_id: int
@@ -36,10 +42,12 @@ class component:
     def is_cell(self) -> bool:
         return self.kind == "cell"
 
+
 @dataclass(frozen=True)
 class net:
     net_id: int
     component_ids: tuple[int, ...]
+
 
 @dataclass
 class site:
@@ -58,6 +66,7 @@ class site:
     def is_empty(self) -> bool:
         return self.fixed_pin_id is None and self.cell_id is None
 
+
 @dataclass
 class grid:
     num_cells: int
@@ -72,7 +81,7 @@ class grid:
     @classmethod
     def create_empty(cls, num_cells: int, num_nets: int, ny: int, nx: int, num_fixed_pins: int) -> grid:
         if nx < 3 or ny < 3:
-            raise netlist_error("grid dimensions must leave at least one core site")
+            raise netlist_error("Grid dimensions must leave at least one core site")
 
         sites: list[list[site]] = []
         for y in range(ny):
@@ -89,7 +98,7 @@ class grid:
 
     def site_at(self, x: int, y: int) -> site:
         if not (0 <= x < self.nx and 0 <= y < self.ny):
-            raise netlist_error(f"site at ({x}, {y}) is outside the grids")
+            raise netlist_error(f"Site at ({x}, {y}) is outside the grids")
         return self.sites[y][x]
 
     def is_perimeter_coord(self, x: int, y: int) -> bool:
@@ -121,7 +130,7 @@ class grid:
 
     def add_component(self, component: component) -> None:
         if component.component_id in self.components:
-            raise netlist_error(f"component {component.component_id} already exists")
+            raise netlist_error(f"Component {component.component_id} already exists")
 
         self.components[component.component_id] = component
 
@@ -131,19 +140,19 @@ class grid:
 
         for cell_type in sorted(valid_cell_types):
             if demand[cell_type] > capacity[cell_type]:
-                raise netlist_error(f"not enough {cell_type} core sites: need {demand[cell_type]}, have {capacity[cell_type]}.")
+                raise netlist_error(f"Not enough {cell_type} core sites: need {demand[cell_type]}, have {capacity[cell_type]}.")
 
     def place_fixed_pin(self, component: component) -> None:
         if component.x is None or component.y is None:
-            raise netlist_error(f"pin {component.component_id} is missing coordinates.")
+            raise netlist_error(f"Pin {component.component_id} is missing coordinates.")
 
         if not self.is_perimeter_coord(component.x, component.y):
-            raise netlist_error(f"pin {component.component_id} at ({component.x}, {component.y}) is not on the perimeter.")
+            raise netlist_error(f"Pin {component.component_id} at ({component.x}, {component.y}) is not on the perimeter.")
 
         site = self.site_at(component.x, component.y)
 
         if site.fixed_pin_id is not None:
-            raise netlist_error(f"pin {component.component_id} overlaps pin {site.fixed_pin_id} at ({site.x}, {site.y})")
+            raise netlist_error(f"Pin {component.component_id} overlaps pin {site.fixed_pin_id} at ({site.x}, {site.y})")
 
         site.fixed_pin_id = component.component_id
 
@@ -151,14 +160,14 @@ class grid:
         component = self.components.get(cell_id)
 
         if component is None or not component.is_cell:
-            raise netlist_error(f"cell {cell_id} is not a valid cell.")
+            raise netlist_error(f"Cell {cell_id} is not a valid cell.")
 
         if component.cell_type is None:
-            raise netlist_error(f"cell {cell_id} has no cell type.")
+            raise netlist_error(f"Cell {cell_id} has no cell type.")
 
         site = self.site_at(x, y)
         if site.is_perimeter:
-            raise netlist_error(f"site at ({x}, {y}) is on the perimeter.")
+            raise netlist_error(f"Site at ({x}, {y}) is on the perimeter.")
 
         if site.fixed_pin_id is not None:
             raise netlist_error(f"Cannot place a cell on pin site ({x}, {y}).")
@@ -212,6 +221,8 @@ class grid:
             rows.append(''.join(chars))
         return '\n'.join(rows)
 
+
+# Parsing functions
 def strip_inline_comment(line: str) -> str:
     line = line.split("#", 1)[0]
     line = line.split("(", 1)[0]
@@ -315,6 +326,8 @@ def parse_netlist(path: str | Path) -> grid:
 def format_counter(counter: Counter[str], keys: Iterable[str]) -> str:
     return ", ".join(f"{key}: {counter[key]}" for key in keys)
 
+
+# I/O functions
 def print_summary(g: grid, source: Path, show_grid: bool) -> None:
     print(f"Loaded: {source}")
     print(f"Header: components={g.num_cells}, nets={g.num_nets}, "f"grid={g.ny}x{g.nx}, fixed_pins={g.num_fixed_pins}")
@@ -328,19 +341,21 @@ def print_summary(g: grid, source: Path, show_grid: bool) -> None:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Load a Structured ASIC netlist and print summary.")
-    parser.add_argument("netlist", type=Path, help="Path to a design_*.txt netlist file.")
+    parser.add_argument("netlist", type=Path, help="Path to a netlist text file.")
     parser.add_argument("--no-grid", action="store_true", help="Skip ASCII grid output.")
     return parser
 
-def main() -> int:
-    parser = build_arg_parser()
-    args = parser.parse_args()
-    try:
-        g = parse_netlist(args.netlist)
-    except netlist_error as exc:
-        parser.exit(status=1, message=f"Netlist error: {exc}\n")
-    print_summary(g, args.netlist, show_grid=not args.no_grid)
-    return 0
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+# For unit testing
+# def main() -> int:
+#     parser = build_arg_parser()
+#     args = parser.parse_args()
+#     try:
+#         g = parse_netlist(args.netlist)
+#     except netlist_error as exc:
+#         parser.exit(status=1, message=f"Netlist error: {exc}\n")
+#     print_summary(g, args.netlist, show_grid=not args.no_grid)
+#     return 0
+
+# if __name__ == "__main__":
+#     raise SystemExit(main())

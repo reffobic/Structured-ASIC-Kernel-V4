@@ -1,4 +1,4 @@
-from Placer import netlist_error, parse_netlist
+from Placer import netlist_error
 
 # Legalization helper functions ---------------------------------------------------------------------------------------------
 def find_nearest_legal_pos(component, grid):
@@ -128,6 +128,9 @@ def hpwl(grid, net):
     return hpwl
 
 def total_hpwl(grid):
+    '''
+    Total HPWL of the grid = sum of HPWL of all nets in the grid.
+    '''
     return sum(hpwl(grid, n) for n in grid.nets)
 
 
