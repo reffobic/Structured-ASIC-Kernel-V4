@@ -30,6 +30,12 @@ def SA_loop(CR, g):
                 continue
 
             cell2 = random.choice(same_type_cells)
+
+            # Pre-swap validation checks 
+            if (not cell1.cell_type == cell2.cell_type) and (cell1.cell_type is not None or cell2.cell_type is not None):
+                print("Warning: Attempting to swap two cells of different types. Skipping this move.")
+                continue
+
             swap(cell1, cell2, g) #implemented by Haya
             new_cost = total_hpwl(g) #implemented by Haya
             delta_cost = new_cost - current_cost
