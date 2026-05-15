@@ -3,48 +3,12 @@ import argparse
 from pathlib import Path
 import random
 from Placer import netlist_error, parse_netlist, print_summary
-from initialPlacement import legalize, total_hpwl
-from SA import SA_loop
+from Placement import global_placement, placement, count_placed_cells
+from SA import SA_loop, total_hpwl
 
 # Set a fixed seed for reprodicibility for easier testing 
 seed = 42
 random.seed(seed)
-
-def global_placement(g):
-    """
-    Deterministic global placement. For each movable cell, pick a random, empty coordinate on the core area.
-    Returns number of placed cells. 
-    """
-
-    placed = 0
-
-    # Build a list of all possible (non-perimeter) empty coordinates
-    empty_sites: list[tuple[int, int]] = []
-    for s in g.iter_core_sites(): # Fetch all core sites to populate empty_sites 
-        if s.is_empty:
-            empty_sites.append((s.x, s.y))
-
-    for cell in g.movable_cells():
-        if cell.placement_x is not None and cell.placement_y is not None: # If the cell already has coordinates
-            continue
-
-        if not empty_sites:
-            raise netlist_error("No empty core sites left for placement.")
-
-        idx = random.randrange(len(empty_sites))
-        x, y = empty_sites.pop(idx)
-        g.attach_cell_to_at(cell.component_id, x, y)
-        placed += 1
-
-    return placed
-
-
-def count_placed_cells(g):
-    '''
-    Helper function to count placed cells, for logging outputs. 
-    '''
-    return sum(1 for c in g.movable_cells() if c.placement_x is not None and c.placement_y is not None)
-
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run full placement pipeline: parse -> init -> legalize -> SA.")
@@ -56,6 +20,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main():
+    # Commandline arguments 
     args = build_arg_parser().parse_args()
 
     # Parse user's netlist file into our grid data structure
@@ -65,34 +30,49 @@ def main():
         print(f"Netlist error: {exc}")
         return 1
 
-    # Show loaded netlist. By default, don't render grid here (it's pins-only at this stage)
-    print_summary(g, args.netlist,1)
+    # Show loaded netlist (it's pins-only at this stage)
+    print_summary(g, args.netlist, 1)
     
-    # 1) Global placement (so every movable cell gets random placement_x/placement_y)
-    newly_placed = global_placement(g)
-    print(f"\nGlobalplacement: placed {newly_placed} previously-unplaced cells.")
-    print_summary(g, args.netlist,1) # logging output 
+    # Placement 
+    randomly_placed = global_placement(g)
+    print(f"\nGlobalplacement: placed {randomly_placed} previously-unplaced cells.")
+    print_summary(g, args.netlist, 1) # logging output 
     
-    # 2) Legalize (ensure legal site type + no overlaps)
-    legalize(g)
-    placed_after_legalize = count_placed_cells(g)
+    placement(g)
+    legaly_placed = count_placed_cells(g)
     total_cells = len(g.movable_cells())
-    if placed_after_legalize != total_cells:
-        raise netlist_error(f"After legalization, only {placed_after_legalize}/{total_cells} cells are placed.")
-    print_summary(g, args.netlist,1) # logging output
+    if legaly_placed != total_cells:
+        raise netlist_error(f"After legalization, only {legaly_placed}/{total_cells} cells are placed.")
+    print_summary(g, args.netlist, 1) # logging output
     
+    # Simulated Annealing Loop
     hpwl_before = total_hpwl(g)
     print(f"HPWL before SA: {hpwl_before}") # logging output
     
-    # 3) Simulated annealing optimization (detailed placement)
-    CR = 0.75 # still need to add a loop with all the CRs
+    CR = 0.85 # this setup is for testing and demo, we loop over different CRs below 
     final_cost, accepted, rejected = SA_loop(CR,g)
     hpwl_after = total_hpwl(g)
+    
     print(f"SA stats: accepted={accepted}, rejected={rejected}")
     print(f"HPWL after SA:  {hpwl_after} (SA returned {final_cost})")
-    print_summary(g, args.netlist,1)
+    print_summary(g, args.netlist, 1)
 
-    return 0
+    # # Loop over different CRs 
+    # for CR in [0.85, 0.9, 0.95, 0.98]:
+    #     # loop 3 times for each CR and get average stats, to account for some randomness in SA
+    #     total_final_cost = 0
+    #     total_accepted = 0
+    #     total_rejected = 0
+    #     for _ in range(3):
+    #         final_cost, accepted, rejected = SA_loop(CR,g)
+    #         hpwl_after = total_hpwl(g)
+    #         total_final_cost += final_cost
+    #         total_accepted += accepted
+    #         total_rejected += rejected
+            
+    #     print(f"CR={CR}: accepted={total_accepted}, rejected={total_rejected}, HPWL after SA: {hpwl_after} (SA returned {total_final_cost})")
+
+    # return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

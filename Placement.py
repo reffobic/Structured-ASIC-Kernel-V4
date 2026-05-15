@@ -1,6 +1,7 @@
+from random import random
 from Placer import netlist_error
 
-# Legalization helper functions ---------------------------------------------------------------------------------------------
+# Placement helper functions ---------------------------------------------------------------------------------------------
 def find_nearest_legal_pos(component, grid):
     '''
     This function finds the nearest legal position for a given component on the grid.
@@ -10,11 +11,11 @@ def find_nearest_legal_pos(component, grid):
     y = component.y if component.y is not None else component.placement_y
     if x is None or y is None:
         return None
+    
     nearest_position = None
     min_distance = float('inf') # Set initial minimum distance to infinity initially 
 
     search_space = grid.iter_core_sites()  # Get all core sites to search through
-
     for site in search_space:
         if site.site_type == component.cell_type and site.is_empty: # If the current site is a type match AND not already occupied
             distance = abs(site.x - x) + abs(site.y - y)  # Manhattan distance (better than eucliden distance for grid-based movement)
@@ -35,19 +36,51 @@ def move_comp(component, new_position, grid):
     grid.attach_cell_to_at(component.component_id, new_position[0], new_position[1])
     component.x, component.y = new_position
 
+def count_placed_cells(g):
+    '''
+    Helper function to count placed cells, for logging outputs. 
+    '''
+    return sum(1 for c in g.movable_cells() if c.placement_x is not None and c.placement_y is not None)
 # ---------------------------------------------------------------------------------------------------------------------------- 
 
 
-def legalize(grid):
+def global_placement(g):
+    """
+    Deterministic global placement. For each movable cell, pick a random, empty coordinate on the core area.
+    Returns number of placed cells. 
+    """
+
+    placed = 0
+
+    # Build a list of all possible (non-perimeter) empty coordinates
+    empty_sites: list[tuple[int, int]] = []
+    for s in g.iter_core_sites(): # Fetch all core sites to populate empty_sites 
+        if s.is_empty:
+            empty_sites.append((s.x, s.y))
+
+    for cell in g.movable_cells():
+        if cell.placement_x is not None and cell.placement_y is not None: # If the cell already has coordinates
+            continue
+
+        if not empty_sites:
+            raise netlist_error("No empty core sites left for placement.")
+
+        idx = random.randrange(len(empty_sites))
+        x, y = empty_sites.pop(idx)
+        g.attach_cell_to_at(cell.component_id, x, y)
+        placed += 1
+
+    return placed
+
+
+def placement(grid):
     '''
-    This function implements Tetris-Placement Legalization.
-    Legalization criteria:
-    1)Not in the perimeter (already guaranteed by the input)
+    This function implements site placement.
+    The criteria:
+    1)Not in the perimeter (already guaranteed by global placement)
     2)The tile type is complementary to the component type 
     3)Components do not overlap i.e. a component cannot be placed on an occupied site 
-    
-    Placement:
-    Minimum displacement i.e. nearest legal position 
+    4)Minimum displacement i.e. nearest legal position 
     '''
     # Fetch movable components of the passed grid
     movable_comps = grid.movable_cells()
@@ -76,61 +109,6 @@ def legalize(grid):
             move_comp(comp, new_position, grid)
 
     
-def swap(component1, component2, grid):
-    '''
-    This function swaps the positions of two components on the grid, meant to be used by SA later.
-    '''
 
-    # Store the original positions of the components
-    x1 = component1.x if component1.x is not None else component1.placement_x
-    y1 = component1.y if component1.y is not None else component1.placement_y
-    x2 = component2.x if component2.x is not None else component2.placement_x
-    y2 = component2.y if component2.y is not None else component2.placement_y
-    if x1 is None or y1 is None or x2 is None or y2 is None:
-        raise netlist_error("Both components must have valid positions to swap")
-    original_pos1 = (x1, y1)
-    original_pos2 = (x2, y2)
-    
-    if(component1.cell_type != component2.cell_type): # Types must match to swap
-        raise netlist_error("Components must be of the same type to swap")
-    else:
-        # Swap the positions of the two components on the grid.
-        grid.detach_cell_from(component1.component_id)
-        grid.detach_cell_from(component2.component_id)
-        grid.attach_cell_to_at(component1.component_id, original_pos2[0], original_pos2[1])
-        grid.attach_cell_to_at(component2.component_id, original_pos1[0], original_pos1[1])
-        component1.x, component1.y = original_pos2[0], original_pos2[1]
-        component2.x, component2.y = original_pos1[0], original_pos1[1]
-
-
-def hpwl(grid, net):
-    '''
-    This function calculates the Half Perimeter Wire Length (HPWL) of a given net. 
-    '''
-
-    # Fetch the components connected to the net using their IDs
-    comp_ids = net.component_ids
-    connected_components = [grid.components[comp_id] for comp_id in comp_ids]
-
-    # Determine the net's bounding box by finding the maximum and minimum x and y coordinates of the connected components
-    xs = [comp.x if comp.x is not None else comp.placement_x for comp in connected_components]
-    ys = [comp.y if comp.y is not None else comp.placement_y for comp in connected_components]
-    if any(v is None for v in xs + ys):
-        raise netlist_error(f"Net {net.net_id} includes unplaced component(s).")
-    max_x = max(xs)
-    min_x = min(xs)
-    max_y = max(ys)
-    min_y = min(ys)
-
-    # Calculate the half-perimeter wire length
-    hpwl = (max_x - min_x) + (max_y - min_y)
-
-    return hpwl
-
-def total_hpwl(grid):
-    '''
-    Total HPWL of the grid = sum of HPWL of all nets in the grid.
-    '''
-    return sum(hpwl(grid, n) for n in grid.nets)
 
 

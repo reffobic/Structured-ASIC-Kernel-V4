@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 import argparse
 from pathlib import Path
 
-# Data structures andlogic for netlist parsing and grid setup
+# Data structures and logic for netlist parsing and grid setup
 valid_cell_types = {"T0", "T1", "T2", "T3"}
 
 master_title = [
@@ -29,6 +29,7 @@ class component:
     component_id: int
     kind: str
     cell_type: str | None = None
+    net_id: int | None = None # Added a net_id field to track which net the component belongs to
     x: int | None = None
     y: int | None = None
     placement_x: int | None = None
