@@ -75,59 +75,81 @@ def build_cell_to_nets(g):
 def partial_hpwl_fast(cell1, cell2, g, cell_to_nets):
     touched = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
     return sum(hpwl(g, net) for net in touched)
-# -------------------------------------------------------------------------------------------------------------
+
+def hpwl_fast(n, coords):
+    '''
+    Faster HPWL using precomputed coordinates dict instead of reading from grid objects.
+    '''
+    xs = [coords[cid][0] for cid in n.component_ids]
+    ys = [coords[cid][1] for cid in n.component_ids]
+    return (max(xs) - min(xs)) + (max(ys) - min(ys))
 
 def SA_loop(CR, g):
-    num_cells = g.num_cells
-    num_nets = g.num_nets
-    initial_cost = initial_total_hpwl(g)
-    T = 500*initial_cost
-    T_fin = (5e-5 * initial_cost) / num_nets
-    num_moves = 20*num_cells
-    cells = g.movable_cells()
+    num_cells   = g.num_cells
+    num_nets    = g.num_nets
+    cells       = g.movable_cells()
+    num_moves   = 20 * num_cells
+
+    cell_to_nets = build_cell_to_nets(g)
+
     cells_by_type = defaultdict(list)
     for cell in cells:
         cells_by_type[cell.cell_type].append(cell)
 
-    current_cost = initial_cost
+    coords = {}
+    for comp in g.components.values():
+        coords[comp.component_id] = (
+            comp.x if comp.is_pin else comp.placement_x,
+            comp.y if comp.is_pin else comp.placement_y,
+        )
+
+    net_hpwl_cache = {n.net_id: hpwl_fast(n, coords) for n in g.nets}
+    current_cost   = sum(net_hpwl_cache.values())
+    initial_cost   = current_cost
+
+    T     = 500 * initial_cost
+    T_fin = (5e-5 * initial_cost) / num_nets
+
     accepted_moves = 0
     rejected_moves = 0
+
     while T > T_fin:
-        for i in range(num_moves):
-            cell1 = random.choice(cells)
-            same_type_cells = cells_by_type[cell1.cell_type]
-
-            if len(same_type_cells) < 2:
+        for _ in range(num_moves):
+            type_list = cells_by_type[random.choice(cells).cell_type]
+            if len(type_list) < 2:
                 continue
+            idx1 = random.randrange(len(type_list))
+            idx2 = random.randrange(len(type_list) - 1)
+            if idx2 >= idx1:
+                idx2 += 1
+            cell1, cell2 = type_list[idx1], type_list[idx2]
 
-            cell2 = random.choice(same_type_cells)
+            # delta cost using caches
+            touched      = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
+            cost_before  = sum(net_hpwl_cache[n.net_id] for n in touched)
 
-            # Note: Pre-swap validation checks now handled inside the swap function 
-            # Use lookup table to instantly get touched nets
-            cell_to_nets = build_cell_to_nets(g)    
-            touched = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
+            # tentative swap in coords only
+            x1, y1 = coords[cell1.component_id]
+            x2, y2 = coords[cell2.component_id]
+            coords[cell1.component_id] = (x2, y2)
+            coords[cell2.component_id] = (x1, y1)
 
-            cost_before = sum(hpwl(g, net) for net in touched)
-            swap(cell1, cell2, g)
-            cost_after = sum(hpwl(g, net) for net in touched)
-            
+            cost_after = sum(hpwl_fast(n, coords) for n in touched)
             delta_cost = cost_after - cost_before
-            if delta_cost < 0:
+
+            if delta_cost < 0 or random.random() < math.exp(-delta_cost / T):
+                #accept: commit to grid and update cache
+                swap(cell1, cell2, g)
+                for n in touched:
+                    net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
                 current_cost += delta_cost
                 accepted_moves += 1
-
             else:
-                p = 1-math.exp(-delta_cost / T)
+                #reject: revert coords dict only (no grid touch needed)
+                coords[cell1.component_id] = (x1, y1)
+                coords[cell2.component_id] = (x2, y2)
+                rejected_moves += 1
 
-                if random.random() > p:
-                    current_cost += delta_cost
-                    accepted_moves += 1
+        T *= CR
 
-                else:
-                    swap(cell1, cell2, g) # Revert the swap
-                    rejected_moves += 1
-
-        T*= CR
-    
-    return current_cost, accepted_moves, rejected_moves
-                
+    return initial_cost, current_cost, accepted_moves, rejected_moves

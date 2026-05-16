@@ -5,6 +5,7 @@ import random
 from Placer import netlist_error, parse_netlist, print_summary
 from Placement import global_placement, placement, count_placed_cells
 from SA import SA_loop, initial_total_hpwl
+import time
 
 # Set a fixed seed for reprodicibility for easier testing 
 seed = 42
@@ -56,15 +57,20 @@ def main():
     # -------------------------------  
 
     # Simulated Annealing Loop
-    hpwl_before = initial_total_hpwl(g)
-    print(f"HPWL before SA: {hpwl_before}") # logging output
+    #hpwl_before = initial_total_hpwl(g)
+    #print(f"HPWL before SA: {hpwl_before}") # logging output
     
-    CR = 0.85 # This setup is for testing and demo, we loop over different CRs below 
-    final_cost, accepted, rejected = SA_loop(CR,g)
-    hpwl_after = initial_total_hpwl(g)
-    
+    CR = 0.95 # This setup is for testing and demo, we loop over different CRs below
+    start = time.perf_counter() 
+    initial_cost, final_cost, accepted, rejected = SA_loop(CR,g)
+    hpwl_before = initial_cost
+    hpwl_after = final_cost
+    elapsed = time.perf_counter() - start
+    print(f"SA runtime:     {elapsed:.2f}s")
     print(f"SA stats: accepted={accepted}, rejected={rejected}")
+    print(f"HPWL after SA:  {hpwl_before} (SA returned {initial_cost})")
     print(f"HPWL after SA:  {hpwl_after} (SA returned {final_cost})")
+    print(f"HPWL change:    {hpwl_after - hpwl_before} ({(hpwl_after - hpwl_before)/hpwl_before:.2%})")
     print_summary(g, args.netlist, 1)
 
     # # Loop over different CRs 
