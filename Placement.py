@@ -1,4 +1,4 @@
-from random import random
+import random
 from Placer import netlist_error
 
 # Placement helper functions ---------------------------------------------------------------------------------------------

@@ -4,7 +4,7 @@ from pathlib import Path
 import random
 from Placer import netlist_error, parse_netlist, print_summary
 from Placement import global_placement, placement, count_placed_cells
-from SA import SA_loop, total_hpwl
+from SA import SA_loop, initial_total_hpwl
 
 # Set a fixed seed for reprodicibility for easier testing 
 seed = 42
@@ -44,14 +44,24 @@ def main():
     if legaly_placed != total_cells:
         raise netlist_error(f"After legalization, only {legaly_placed}/{total_cells} cells are placed.")
     print_summary(g, args.netlist, 1) # logging output
-    
+
+    # check overlap (haya debugging)
+    occupied = {}
+    for cell in g.movable_cells():
+        pos = (cell.placement_x, cell.placement_y)
+        if pos in occupied:
+            print(f"OVERLAP: cell {cell.component_id} and {occupied[pos]} both at {pos}")
+        else:
+            occupied[pos] = cell.component_id
+    # -------------------------------  
+
     # Simulated Annealing Loop
-    hpwl_before = total_hpwl(g)
+    hpwl_before = initial_total_hpwl(g)
     print(f"HPWL before SA: {hpwl_before}") # logging output
     
-    CR = 0.85 # this setup is for testing and demo, we loop over different CRs below 
+    CR = 0.85 # This setup is for testing and demo, we loop over different CRs below 
     final_cost, accepted, rejected = SA_loop(CR,g)
-    hpwl_after = total_hpwl(g)
+    hpwl_after = initial_total_hpwl(g)
     
     print(f"SA stats: accepted={accepted}, rejected={rejected}")
     print(f"HPWL after SA:  {hpwl_after} (SA returned {final_cost})")
@@ -72,7 +82,7 @@ def main():
             
     #     print(f"CR={CR}: accepted={total_accepted}, rejected={total_rejected}, HPWL after SA: {hpwl_after} (SA returned {total_final_cost})")
 
-    # return 0
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

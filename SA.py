@@ -19,7 +19,7 @@ def swap(component1, component2, grid):
     original_pos1 = (x1, y1)
     original_pos2 = (x2, y2)
     
-    if(component1.cell_type != component2.cell_type): # Types must match to swap
+    if(component1.cell_type != component2.cell_type) and (component1.cell_type is not None or component2.cell_type is not None): # Types must match to swap
         raise netlist_error("Components must be of the same type to swap")
     else:
         # Swap the positions of the two components on the grid.
@@ -55,31 +55,32 @@ def hpwl(grid, net):
 
     return hpwl
 
-def total_hpwl(old_grid, new_grid):
+def initial_total_hpwl(grid):
     '''
-    Total HPWL of the grid = sum of HPWL of only the changed nets in the grid.
+    This function calculates the total HPWL of the grid by summing the HPWL of all nets, meant to be used before SA when we don't have a previous grid to compare to.
     '''
-    changed_nets = set()
     total_hpwl = 0
-
-    for new_cell in new_grid.movable_cells():
-        for old_cell in old_grid.movable_cells():
-            if new_cell.placement_x != old_cell.placement_x or new_cell.placement_y != old_cell.placement_y:
-                # Add the net connected to this component to the set of changed nets
-                if new_cell.net_id is not None:
-                    changed_nets.add(new_cell.net_id)
-
-    for net_id in changed_nets:
-        net = new_grid.nets[net_id]
-        total_hpwl += hpwl(new_grid, net)
+    for net in grid.nets:
+        total_hpwl += hpwl(grid, net)
 
     return total_hpwl
+
+def build_cell_to_nets(g):
+    cell_to_nets = defaultdict(set)
+    for net in g.nets:
+        for comp_id in net.component_ids:
+            cell_to_nets[comp_id].add(net)
+    return cell_to_nets
+
+def partial_hpwl_fast(cell1, cell2, g, cell_to_nets):
+    touched = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
+    return sum(hpwl(g, net) for net in touched)
 # -------------------------------------------------------------------------------------------------------------
 
 def SA_loop(CR, g):
     num_cells = g.num_cells
     num_nets = g.num_nets
-    initial_cost = total_hpwl(g) # implemented by Haya 
+    initial_cost = initial_total_hpwl(g)
     T = 500*initial_cost
     T_fin = (5e-5 * initial_cost) / num_nets
     num_moves = 20*num_cells
@@ -101,27 +102,29 @@ def SA_loop(CR, g):
 
             cell2 = random.choice(same_type_cells)
 
-            # Pre-swap validation checks 
-            if (not cell1.cell_type == cell2.cell_type) and (cell1.cell_type is not None or cell2.cell_type is not None):
-                print("Warning: Attempting to swap two cells of different types. Skipping this move.")
-                continue
+            # Note: Pre-swap validation checks now handled inside the swap function 
+            # Use lookup table to instantly get touched nets
+            cell_to_nets = build_cell_to_nets(g)    
+            touched = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
 
-            swap(cell1, cell2, g) # implemented by Haya
-            new_cost = total_hpwl(g) # implemented by Haya
-            delta_cost = new_cost - current_cost
+            cost_before = sum(hpwl(g, net) for net in touched)
+            swap(cell1, cell2, g)
+            cost_after = sum(hpwl(g, net) for net in touched)
+            
+            delta_cost = cost_after - cost_before
             if delta_cost < 0:
-                current_cost = new_cost
+                current_cost += delta_cost
                 accepted_moves += 1
 
             else:
                 p = 1-math.exp(-delta_cost / T)
 
                 if random.random() > p:
-                    current_cost = new_cost
+                    current_cost += delta_cost
                     accepted_moves += 1
 
                 else:
-                    swap(cell1, cell2, g) # revert the swap
+                    swap(cell1, cell2, g) # Revert the swap
                     rejected_moves += 1
 
         T*= CR
