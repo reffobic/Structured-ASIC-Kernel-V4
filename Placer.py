@@ -190,6 +190,8 @@ class grid:
         site.cell_id = cell_id
         component.placement_x = x
         component.placement_y = y
+        component.x = x
+        component.y = y
 
     def detach_cell_from(self, cell_id: int) -> None:
         component = self.components.get(cell_id)
@@ -206,6 +208,8 @@ class grid:
 
         component.placement_x = None
         component.placement_y = None
+        component.x = None
+        component.y = None
 
     def render(self) -> str:
         rows: list[str] = []

@@ -1,9 +1,12 @@
-import math 
+import math
 import random
-from Placer import grid, netlist_error
 from collections import defaultdict
 
-# Simulated Annealing helper functions ---------------------------------------------------------------------------------------------
+from Placer import netlist_error
+
+# try empty site moves sometimes (handout says cells can swap with empty tiles)
+EMPTY_MOVE_CHANCE = 0.3
+
 def swap(component1, component2, grid):
     '''
     This function swaps the positions of two components on the grid.
@@ -16,19 +19,50 @@ def swap(component1, component2, grid):
     y2 = component2.y if component2.y is not None else component2.placement_y
     if x1 is None or y1 is None or x2 is None or y2 is None:
         raise netlist_error("Both components must have valid positions to swap")
-    original_pos1 = (x1, y1)
-    original_pos2 = (x2, y2)
-    
-    if(component1.cell_type != component2.cell_type) and (component1.cell_type is not None or component2.cell_type is not None): # Types must match to swap
+    if (x1, y1) == (x2, y2):
+        return False
+    if component1.cell_type != component2.cell_type:
         raise netlist_error("Components must be of the same type to swap")
-    else:
-        # Swap the positions of the two components on the grid.
-        grid.detach_cell_from(component1.component_id)
-        grid.detach_cell_from(component2.component_id)
-        grid.attach_cell_to_at(component1.component_id, original_pos2[0], original_pos2[1])
-        grid.attach_cell_to_at(component2.component_id, original_pos1[0], original_pos1[1])
-        component1.x, component1.y = original_pos2[0], original_pos2[1]
-        component2.x, component2.y = original_pos1[0], original_pos1[1]
+
+    # original_pos1 = (x1, y1)
+    # original_pos2 = (x2, y2)
+    
+    # if(component1.cell_type != component2.cell_type) and (component1.cell_type is not None or component2.cell_type is not None): # Types must match to swap
+    #   raise netlist_error("Components must be of the same type to swap")
+    # else:
+    #     # Swap the positions of the two components on the grid.
+    #     grid.detach_cell_from(component1.component_id)
+    #     grid.detach_cell_from(component2.component_id)
+    #     grid.attach_cell_to_at(component1.component_id, original_pos2[0], original_pos2[1])
+    #     grid.attach_cell_to_at(component2.component_id, original_pos1[0], original_pos1[1])
+    #     component1.x, component1.y = original_pos2[0], original_pos2[1]
+    #     component2.x, component2.y = original_pos1[0], original_pos1[1]
+    pos1 = (x1, y1)
+    pos2 = (x2, y2)
+    grid.detach_cell_from(component1.component_id)
+    grid.detach_cell_from(component2.component_id)
+    grid.attach_cell_to_at(component1.component_id, pos2[0], pos2[1])
+    grid.attach_cell_to_at(component2.component_id, pos1[0], pos1[1])
+    return True
+
+
+def move_cell_to(cell, grid, x, y):
+    grid.detach_cell_from(cell.component_id)
+    grid.attach_cell_to_at(cell.component_id, x, y)
+
+
+def build_empty_by_type(grid):
+    empty = defaultdict(list)
+    for site in grid.iter_core_sites():
+        if site.site_type and site.is_empty:
+            empty[site.site_type].append((site.x, site.y))
+    return empty
+
+
+def accept_move(delta, T):
+    if delta < 0:
+        return True
+    return random.random() < math.exp(-delta / T)
 
 
 def hpwl(grid, net):
@@ -147,47 +181,88 @@ def SA_loop(CR, g):
     accepted_moves = 0
     rejected_moves = 0
 
+    types_with_cells = [k for k, v in cells_by_type.items() if v]
+    types_for_swap = [k for k, v in cells_by_type.items() if len(v) >= 2]
+    empty_by_type = build_empty_by_type(g)
+
     while T > T_fin:
-        # NEW second attempted optimization: instead of picking a random cell then finding its type group AND precompute type_keys outside the loop since it never changes 
-        valid_type_keys = [k for k, v in cells_by_type.items() if len(v) >= 2]
-
         for _ in range(num_moves):
-            # NEW second attempted optimization continued
-            type_list = cells_by_type[random.choice(valid_type_keys)]
-            # type_list = cells_by_type[random.choice(cells).cell_type]
+            ctype = random.choice(types_with_cells)
+            cell1 = random.choice(cells_by_type[ctype])
 
-            # This is already being checked now outside the loop with valid_type_keys  
-            # if len(type_list) < 2:
-            #     continue
+            # move onto an empty site of the same type
+            empties = empty_by_type.get(ctype)
+            if empties and random.random() < EMPTY_MOVE_CHANCE:
+                old_x, old_y = coords[cell1.component_id]
+                new_x, new_y = random.choice(empties)
+                if (new_x, new_y) == (old_x, old_y):
+                    continue
 
+                touched = cell_to_nets[cell1.component_id]
+                cost_before = sum(net_hpwl_cache[n.net_id] for n in touched)
+
+                coords[cell1.component_id] = (new_x, new_y)
+                cost_after = sum(hpwl_fast(n, coords) for n in touched)
+                delta_cost = cost_after - cost_before
+
+                if accept_move(delta_cost, T):
+                    move_cell_to(cell1, g, new_x, new_y)
+                    empties.append((old_x, old_y))
+                    if (new_x, new_y) in empties:
+                        empties.remove((new_x, new_y))
+                    for n in touched:
+                        net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
+                    current_cost += delta_cost
+                    accepted_moves += 1
+                else:
+                    coords[cell1.component_id] = (old_x, old_y)
+                    rejected_moves += 1
+                continue
+
+            # otherwise swap two different cells of the same type
+            if ctype not in types_for_swap:
+                continue
+            type_list = cells_by_type[ctype]
             idx1 = random.randrange(len(type_list))
             idx2 = random.randrange(len(type_list) - 1)
             if idx2 >= idx1:
                 idx2 += 1
             cell1, cell2 = type_list[idx1], type_list[idx2]
 
-            # delta cost using caches
-            touched      = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
-            cost_before  = sum(net_hpwl_cache[n.net_id] for n in touched)
+            touched = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
+            cost_before = sum(net_hpwl_cache[n.net_id] for n in touched)
 
-            # tentative swap in coords only
             x1, y1 = coords[cell1.component_id]
             x2, y2 = coords[cell2.component_id]
+            if (x1, y1) == (x2, y2):
+                continue
+
             coords[cell1.component_id] = (x2, y2)
             coords[cell2.component_id] = (x1, y1)
 
             cost_after = sum(hpwl_fast(n, coords) for n in touched)
             delta_cost = cost_after - cost_before
 
-            if delta_cost < 0 or random.random() < math.exp(-delta_cost / T):
-                #accept: commit to grid and update cache
-                swap(cell1, cell2, g)
-                for n in touched:
-                    net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
-                current_cost += delta_cost
-                accepted_moves += 1
+            # if delta_cost < 0 or random.random() < math.exp(-delta_cost / T):
+            #     #accept: commit to grid and update cache
+            #     swap(cell1, cell2, g)
+            #     for n in touched:
+            #         net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
+            #     current_cost += delta_cost
+            #     accepted_moves += 1
+            # else:
+            #     #reject: revert coords dict only (no grid touch needed)
+            if accept_move(delta_cost, T):
+                if swap(cell1, cell2, g):
+                    for n in touched:
+                        net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
+                    current_cost += delta_cost
+                    accepted_moves += 1
+                else:
+                    coords[cell1.component_id] = (x1, y1)
+                    coords[cell2.component_id] = (x2, y2)
+                    rejected_moves += 1
             else:
-                #reject: revert coords dict only (no grid touch needed)
                 coords[cell1.component_id] = (x1, y1)
                 coords[cell2.component_id] = (x2, y2)
                 rejected_moves += 1

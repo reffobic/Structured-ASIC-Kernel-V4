@@ -183,7 +183,7 @@ class PlacementApp:
                 self.root.after(0, lambda: self.draw(self.stage_grids["legalized"]))
 
                 hpwl_before, hpwl_after, acc, rej = SA_loop(cr, grid)
-                self.stage_grids["after SA"] = grid
+                self.stage_grids["after SA"] = copy.deepcopy(grid)
 
                 def finish():
                     self.status.set(
