@@ -51,6 +51,16 @@ def move_cell_to(cell, grid, x, y):
     grid.attach_cell_to_at(cell.component_id, x, y)
 
 
+def sync_coords_to_grid(g, coords):
+    # write SA result back to grid once at the end (faster than detach/attach every accept)
+    cells = g.movable_cells()
+    for cell in cells:
+        g.detach_cell_from(cell.component_id)
+    for cell in cells:
+        x, y = coords[cell.component_id]
+        g.attach_cell_to_at(cell.component_id, x, y)
+
+
 def build_empty_by_type(grid):
     empty = defaultdict(list)
     for site in grid.iter_core_sites():
@@ -206,7 +216,6 @@ def SA_loop(CR, g):
                 delta_cost = cost_after - cost_before
 
                 if accept_move(delta_cost, T):
-                    move_cell_to(cell1, g, new_x, new_y)
                     empties.append((old_x, old_y))
                     if (new_x, new_y) in empties:
                         empties.remove((new_x, new_y))
@@ -243,30 +252,18 @@ def SA_loop(CR, g):
             cost_after = sum(hpwl_fast(n, coords) for n in touched)
             delta_cost = cost_after - cost_before
 
-            # if delta_cost < 0 or random.random() < math.exp(-delta_cost / T):
-            #     #accept: commit to grid and update cache
-            #     swap(cell1, cell2, g)
-            #     for n in touched:
-            #         net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
-            #     current_cost += delta_cost
-            #     accepted_moves += 1
-            # else:
-            #     #reject: revert coords dict only (no grid touch needed)
             if accept_move(delta_cost, T):
-                if swap(cell1, cell2, g):
-                    for n in touched:
-                        net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
-                    current_cost += delta_cost
-                    accepted_moves += 1
-                else:
-                    coords[cell1.component_id] = (x1, y1)
-                    coords[cell2.component_id] = (x2, y2)
-                    rejected_moves += 1
+                for n in touched:
+                    net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
+                current_cost += delta_cost
+                accepted_moves += 1
             else:
                 coords[cell1.component_id] = (x1, y1)
                 coords[cell2.component_id] = (x2, y2)
                 rejected_moves += 1
 
         T *= CR
+
+    sync_coords_to_grid(g, coords)
 
     return initial_cost, current_cost, accepted_moves, rejected_moves
