@@ -145,7 +145,7 @@ def hpwl_fast(n, coords):
 # ---------------------------------------------------------------------------------------------------------------------------------
 
 
-def SA_loop(CR, g):
+def SA_loop(CR, g, history=None):
     num_cells   = g.num_cells
     num_nets    = g.num_nets
     cells       = g.movable_cells()
@@ -194,6 +194,12 @@ def SA_loop(CR, g):
     types_with_cells = [k for k, v in cells_by_type.items() if v]
     types_for_swap = [k for k, v in cells_by_type.items() if len(v) >= 2]
     empty_by_type = build_empty_by_type(g)
+
+    # for graphs: (step, T, current twl, best twl so far) each cooling step
+    best_cost = current_cost
+    step = 0
+    if history is not None:
+        history.append((step, T, current_cost, best_cost))
 
     while T > T_fin:
         for _ in range(num_moves):
@@ -262,6 +268,11 @@ def SA_loop(CR, g):
                 coords[cell2.component_id] = (x2, y2)
                 rejected_moves += 1
 
+        if current_cost < best_cost:
+            best_cost = current_cost
+        step += 1
+        if history is not None:
+            history.append((step, T, current_cost, best_cost))
         T *= CR
 
     sync_coords_to_grid(g, coords)

@@ -78,8 +78,8 @@ def main():
     elapsed = time.perf_counter() - start
     print(f"SA runtime:     {elapsed:.2f}s")
     print(f"SA stats: accepted={accepted}, rejected={rejected}")
-    print(f"HPWL after SA:  {hpwl_before} (SA returned {initial_cost})")
-    print(f"HPWL after SA:  {hpwl_after} (SA returned {final_cost})")
+    print(f"HPWL before SA: {hpwl_before}")
+    print(f"HPWL after SA:  {hpwl_after}")
     print(f"HPWL change:    {hpwl_after - hpwl_before} ({(hpwl_after - hpwl_before)/hpwl_before:.2%})")
     print_summary(g, args.netlist, 1)
 
