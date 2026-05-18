@@ -76,13 +76,30 @@ def partial_hpwl_fast(cell1, cell2, g, cell_to_nets):
     touched = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
     return sum(hpwl(g, net) for net in touched)
 
+# def hpwl_fast(n, coords):
+#     '''
+#     Faster HPWL using precomputed coordinates dict instead of reading from grid objects.
+#     '''
+#     xs = [coords[cid][0] for cid in n.component_ids]
+#     ys = [coords[cid][1] for cid in n.component_ids]
+#     return (max(xs) - min(xs)) + (max(ys) - min(ys))
+
+# NEW third attempted optimization: manual min/max without lists. Still keeping the coords dict for O(1) lookups but avoiding the overhead of lists and built-in max/min functions.
 def hpwl_fast(n, coords):
     '''
     Faster HPWL using precomputed coordinates dict instead of reading from grid objects.
     '''
-    xs = [coords[cid][0] for cid in n.component_ids]
-    ys = [coords[cid][1] for cid in n.component_ids]
-    return (max(xs) - min(xs)) + (max(ys) - min(ys))
+    min_x = min_y = float('inf')
+    max_x = max_y = float('-inf')
+    for cid in n.component_ids:
+        x, y = coords[cid]
+        if x < min_x: min_x = x
+        if x > max_x: max_x = x
+        if y < min_y: min_y = y
+        if y > max_y: max_y = y
+    return (max_x - min_x) + (max_y - min_y)
+# ---------------------------------------------------------------------------------------------------------------------------------
+
 
 def SA_loop(CR, g):
     num_cells   = g.num_cells
@@ -96,15 +113,32 @@ def SA_loop(CR, g):
     for cell in cells:
         cells_by_type[cell.cell_type].append(cell)
 
-    coords = {}
+    # coords = {}
+    # for comp in g.components.values():
+    #     coords[comp.component_id] = (
+    #         comp.x if comp.is_pin else comp.placement_x,
+    #         comp.y if comp.is_pin else comp.placement_y,
+    #     )
+
+    # net_hpwl_cache = {n.net_id: hpwl_fast(n, coords) for n in g.nets}
+
+    #  NEW first attempted optimization: list instead of dict for the same lookup efficiency but without hashing overhead
+    max_id = max(g.components.keys())  
+
+    coords = [None] * (max_id + 1)     
+
     for comp in g.components.values():
         coords[comp.component_id] = (
-            comp.x if comp.is_pin else comp.placement_x,
+            comp.x if comp.is_pin else comp.placement_x, # Keep pins check since it's needed for HPWL calculation 
             comp.y if comp.is_pin else comp.placement_y,
         )
+    
+    net_hpwl_cache = [0.0] * num_nets  
+    for n in g.nets:
+        net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
+    # -------------------------------------------------------------------------------------------------------------- 
 
-    net_hpwl_cache = {n.net_id: hpwl_fast(n, coords) for n in g.nets}
-    current_cost   = sum(net_hpwl_cache.values())
+    current_cost = sum(net_hpwl_cache)
     initial_cost   = current_cost
 
     T     = 500 * initial_cost
@@ -114,10 +148,18 @@ def SA_loop(CR, g):
     rejected_moves = 0
 
     while T > T_fin:
+        # NEW second attempted optimization: instead of picking a random cell then finding its type group AND precompute type_keys outside the loop since it never changes 
+        valid_type_keys = [k for k, v in cells_by_type.items() if len(v) >= 2]
+
         for _ in range(num_moves):
-            type_list = cells_by_type[random.choice(cells).cell_type]
-            if len(type_list) < 2:
-                continue
+            # NEW second attempted optimization continued
+            type_list = cells_by_type[random.choice(valid_type_keys)]
+            # type_list = cells_by_type[random.choice(cells).cell_type]
+
+            # This is already being checked now outside the loop with valid_type_keys  
+            # if len(type_list) < 2:
+            #     continue
+
             idx1 = random.randrange(len(type_list))
             idx2 = random.randrange(len(type_list) - 1)
             if idx2 >= idx1:

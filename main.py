@@ -4,17 +4,26 @@ from pathlib import Path
 import random
 from Placer import netlist_error, parse_netlist, print_summary
 from Placement import global_placement, placement, count_placed_cells
-from SA import SA_loop, initial_total_hpwl
+from SA import SA_loop
 import time
 
 # Set a fixed seed for reprodicibility for easier testing 
 seed = 42
 random.seed(seed)
 
+# Added a function to parse and validate a CR instead of hardcoding it during tests  
+def parse_cr(value: str) -> float:
+    cr = float(value)
+    if not 0 < cr < 1:
+        raise argparse.ArgumentTypeError("Cooling rate must be 0 < CR < 1.")
+    return cr
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run full placement pipeline: parse -> init -> legalize -> SA.")
     p.add_argument("netlist", type=Path, help="Path to a design_*.txt netlist file.")
-    p.add_argument("--cr", type=float, default=0.95, help="Cooling rate (0<CR<1).")
+    p.add_argument("cr", nargs="?", type=parse_cr, help="Optional cooling rate (0<CR<1) after the netlist file.")
+    p.add_argument("--cr", dest="cr_flag", type=parse_cr, default=0.95, help="Cooling rate (0<CR<1).")
     p.add_argument("--show-grid", action="store_true", help="Render ASCII grid at the end (after SA).")
     p.add_argument("--show-initial-grid", action="store_true", help="Also render grid right after parsing (pins only).")
     return p
@@ -23,6 +32,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main():
     # Commandline arguments 
     args = build_arg_parser().parse_args()
+    cr = args.cr if args.cr is not None else args.cr_flag
 
     # Parse user's netlist file into our grid data structure
     try:
@@ -46,7 +56,7 @@ def main():
         raise netlist_error(f"After legalization, only {legaly_placed}/{total_cells} cells are placed.")
     print_summary(g, args.netlist, 1) # logging output
 
-    # check overlap (haya debugging)
+    # check overlap (haya debugging)--------------------------------
     occupied = {}
     for cell in g.movable_cells():
         pos = (cell.placement_x, cell.placement_y)
@@ -54,13 +64,13 @@ def main():
             print(f"OVERLAP: cell {cell.component_id} and {occupied[pos]} both at {pos}")
         else:
             occupied[pos] = cell.component_id
-    # -------------------------------  
+    # ---------------------------------------------------------------
 
     # Simulated Annealing Loop
     #hpwl_before = initial_total_hpwl(g)
     #print(f"HPWL before SA: {hpwl_before}") # logging output
     
-    CR = 0.95 # This setup is for testing and demo, we loop over different CRs below
+    CR = cr # This setup is for testing and demo, we loop over all CRs below  
     start = time.perf_counter() 
     initial_cost, final_cost, accepted, rejected = SA_loop(CR,g)
     hpwl_before = initial_cost
@@ -74,7 +84,7 @@ def main():
     print_summary(g, args.netlist, 1)
 
     # # Loop over different CRs 
-    # for CR in [0.85, 0.9, 0.95, 0.98]:
+    # for CR in [0.75, 0.8, 0.85, 0.9, 0.95]:
     #     # loop 3 times for each CR and get average stats, to account for some randomness in SA
     #     total_final_cost = 0
     #     total_accepted = 0
