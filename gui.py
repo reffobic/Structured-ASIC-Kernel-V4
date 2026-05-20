@@ -77,6 +77,9 @@ class PlacementApp:
         self.cr_entry = tk.StringVar(value="0.75")
         ttk.Entry(row2, textvariable=self.cr_entry, width=6).pack(side=tk.LEFT, padx=4)
 
+        self.nonlinear = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row2, text="nonlinear", variable=self.nonlinear).pack(side=tk.LEFT, padx=4)
+
         self.run_button = ttk.Button(row2, text="Run", command=self.run_placement)
         self.run_button.pack(side=tk.LEFT, padx=8)
 
@@ -167,7 +170,9 @@ class PlacementApp:
 
         self.busy = True
         self.run_button["state"] = "disabled"
-        self.status.set("running placement...")
+        self.status.set("running...")
+
+        nonlinear = self.nonlinear.get()
 
         def do_work():
             try:
@@ -176,22 +181,22 @@ class PlacementApp:
 
                 global_placement(grid)
                 self.stage_grids["global"] = copy.deepcopy(grid)
-                self.root.after(0, lambda: self.draw(self.stage_grids["global"]))
 
                 placement(grid)
                 self.stage_grids["legalized"] = copy.deepcopy(grid)
-                self.root.after(0, lambda: self.draw(self.stage_grids["legalized"]))
 
-                hpwl_before, hpwl_after, acc, rej = SA_loop(cr, grid)
-                self.stage_grids["after SA"] = grid
+                # SA only writes coords during the loop; grid sync happens at the end in SA.py
+                self.root.after(0, lambda: self.status.set("running SA..."))
+                hpwl_before, hpwl_after, acc, rej = SA_loop(cr, grid, nonlinear=nonlinear)
+                self.stage_grids["after SA"] = copy.deepcopy(grid)
 
                 def finish():
                     self.status.set(
-                        "done! HPWL %.0f -> %.0f  (+%d / -%d moves)"
+                        "done HPWL %.0f -> %.0f (+%d -%d)"
                         % (hpwl_before, hpwl_after, acc, rej)
                     )
                     self.stage_combo.set(STAGE_NAMES["after SA"])
-                    self.draw(grid)
+                    self.draw(self.stage_grids["after SA"])
                     self.busy = False
                     self.run_button["state"] = "normal"
 
