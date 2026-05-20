@@ -1,9 +1,12 @@
-import math 
+import math
 import random
-from Placer import grid, netlist_error
 from collections import defaultdict
 
-# Simulated Annealing helper functions ---------------------------------------------------------------------------------------------
+from Placer import netlist_error
+
+# try empty site moves sometimes (handout says cells can swap with empty tiles)
+EMPTY_MOVE_CHANCE = 0.3
+
 def swap(component1, component2, grid):
     '''
     This function swaps the positions of two components on the grid.
@@ -16,19 +19,60 @@ def swap(component1, component2, grid):
     y2 = component2.y if component2.y is not None else component2.placement_y
     if x1 is None or y1 is None or x2 is None or y2 is None:
         raise netlist_error("Both components must have valid positions to swap")
-    original_pos1 = (x1, y1)
-    original_pos2 = (x2, y2)
-    
-    if(component1.cell_type != component2.cell_type) and (component1.cell_type is not None or component2.cell_type is not None): # Types must match to swap
+    if (x1, y1) == (x2, y2):
+        return False
+    if component1.cell_type != component2.cell_type:
         raise netlist_error("Components must be of the same type to swap")
-    else:
-        # Swap the positions of the two components on the grid.
-        grid.detach_cell_from(component1.component_id)
-        grid.detach_cell_from(component2.component_id)
-        grid.attach_cell_to_at(component1.component_id, original_pos2[0], original_pos2[1])
-        grid.attach_cell_to_at(component2.component_id, original_pos1[0], original_pos1[1])
-        component1.x, component1.y = original_pos2[0], original_pos2[1]
-        component2.x, component2.y = original_pos1[0], original_pos1[1]
+
+    # original_pos1 = (x1, y1)
+    # original_pos2 = (x2, y2)
+    
+    # if(component1.cell_type != component2.cell_type) and (component1.cell_type is not None or component2.cell_type is not None): # Types must match to swap
+    #   raise netlist_error("Components must be of the same type to swap")
+    # else:
+    #     # Swap the positions of the two components on the grid.
+    #     grid.detach_cell_from(component1.component_id)
+    #     grid.detach_cell_from(component2.component_id)
+    #     grid.attach_cell_to_at(component1.component_id, original_pos2[0], original_pos2[1])
+    #     grid.attach_cell_to_at(component2.component_id, original_pos1[0], original_pos1[1])
+    #     component1.x, component1.y = original_pos2[0], original_pos2[1]
+    #     component2.x, component2.y = original_pos1[0], original_pos1[1]
+    pos1 = (x1, y1)
+    pos2 = (x2, y2)
+    grid.detach_cell_from(component1.component_id)
+    grid.detach_cell_from(component2.component_id)
+    grid.attach_cell_to_at(component1.component_id, pos2[0], pos2[1])
+    grid.attach_cell_to_at(component2.component_id, pos1[0], pos1[1])
+    return True
+
+
+def move_cell_to(cell, grid, x, y):
+    grid.detach_cell_from(cell.component_id)
+    grid.attach_cell_to_at(cell.component_id, x, y)
+
+
+def sync_coords_to_grid(g, coords):
+    # write SA result back to grid once at the end (faster than detach/attach every accept)
+    cells = g.movable_cells()
+    for cell in cells:
+        g.detach_cell_from(cell.component_id)
+    for cell in cells:
+        x, y = coords[cell.component_id]
+        g.attach_cell_to_at(cell.component_id, x, y)
+
+
+def build_empty_by_type(grid):
+    empty = defaultdict(list)
+    for site in grid.iter_core_sites():
+        if site.site_type and site.is_empty:
+            empty[site.site_type].append((site.x, site.y))
+    return empty
+
+
+def accept_move(delta, T):
+    if delta < 0:
+        return True
+    return random.random() < math.exp(-delta / T)
 
 
 def hpwl(grid, net):
@@ -101,7 +145,7 @@ def hpwl_fast(n, coords):
 # ---------------------------------------------------------------------------------------------------------------------------------
 
 
-def SA_loop(CR, g):
+def SA_loop(CR, g, nonlinear=False):
     num_cells   = g.num_cells
     num_nets    = g.num_nets
     cells       = g.movable_cells()
@@ -113,33 +157,20 @@ def SA_loop(CR, g):
     for cell in cells:
         cells_by_type[cell.cell_type].append(cell)
 
-    # coords = {}
-    # for comp in g.components.values():
-    #     coords[comp.component_id] = (
-    #         comp.x if comp.is_pin else comp.placement_x,
-    #         comp.y if comp.is_pin else comp.placement_y,
-    #     )
-
-    # net_hpwl_cache = {n.net_id: hpwl_fast(n, coords) for n in g.nets}
-
-    #  NEW first attempted optimization: list instead of dict for the same lookup efficiency but without hashing overhead
-    max_id = max(g.components.keys())  
-
-    coords = [None] * (max_id + 1)     
-
+    max_id = max(g.components.keys())
+    coords = [None] * (max_id + 1)
     for comp in g.components.values():
         coords[comp.component_id] = (
-            comp.x if comp.is_pin else comp.placement_x, # Keep pins check since it's needed for HPWL calculation 
+            comp.x if comp.is_pin else comp.placement_x,
             comp.y if comp.is_pin else comp.placement_y,
         )
-    
-    net_hpwl_cache = [0.0] * num_nets  
+
+    net_hpwl_cache = [0.0] * num_nets
     for n in g.nets:
         net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
-    # -------------------------------------------------------------------------------------------------------------- 
 
     current_cost = sum(net_hpwl_cache)
-    initial_cost   = current_cost
+    initial_cost = current_cost
 
     T     = 500 * initial_cost
     T_fin = (5e-5 * initial_cost) / num_nets
@@ -147,51 +178,102 @@ def SA_loop(CR, g):
     accepted_moves = 0
     rejected_moves = 0
 
+    types_with_cells = [k for k, v in cells_by_type.items() if v]
+    types_for_swap   = [k for k, v in cells_by_type.items() if len(v) >= 2]
+    empty_by_type    = build_empty_by_type(g)
+
+    # non-linear cooling setup
+    if nonlinear:
+        CR_max = CR
+        CR_min = max(0.75, CR - 0.20)
+        print(f"  Using adaptive non-linear cooling (CR_min={CR_min}, CR_max={CR_max})")
+    else:
+        print(f"  Using fixed linear cooling (CR={CR})")
+
     while T > T_fin:
-        # NEW second attempted optimization: instead of picking a random cell then finding its type group AND precompute type_keys outside the loop since it never changes 
-        valid_type_keys = [k for k, v in cells_by_type.items() if len(v) >= 2]
+        step_accepted = 0
 
         for _ in range(num_moves):
-            # NEW second attempted optimization continued
-            type_list = cells_by_type[random.choice(valid_type_keys)]
-            # type_list = cells_by_type[random.choice(cells).cell_type]
+            ctype = random.choice(types_with_cells)
+            cell1 = random.choice(cells_by_type[ctype])
 
-            # This is already being checked now outside the loop with valid_type_keys  
-            # if len(type_list) < 2:
-            #     continue
+            # ── empty site move ───────────────────────────────────────────
+            empties = empty_by_type.get(ctype)
+            if empties and random.random() < EMPTY_MOVE_CHANCE:
+                old_x, old_y = coords[cell1.component_id]
+                new_x, new_y = random.choice(empties)
+                if (new_x, new_y) == (old_x, old_y):
+                    continue
 
+                touched     = cell_to_nets[cell1.component_id]
+                cost_before = sum(net_hpwl_cache[n.net_id] for n in touched)
+                coords[cell1.component_id] = (new_x, new_y)
+                cost_after  = sum(hpwl_fast(n, coords) for n in touched)
+                delta_cost  = cost_after - cost_before
+
+                if accept_move(delta_cost, T):
+                    empties.append((old_x, old_y))
+                    if (new_x, new_y) in empties:
+                        empties.remove((new_x, new_y))
+                    for n in touched:
+                        net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
+                    current_cost += delta_cost
+                    accepted_moves += 1
+                    step_accepted  += 1
+                else:
+                    coords[cell1.component_id] = (old_x, old_y)
+                    rejected_moves += 1
+                continue
+
+            # ── cell swap move ────────────────────────────────────────────
+            if ctype not in types_for_swap:
+                continue
+            type_list = cells_by_type[ctype]
             idx1 = random.randrange(len(type_list))
             idx2 = random.randrange(len(type_list) - 1)
             if idx2 >= idx1:
                 idx2 += 1
             cell1, cell2 = type_list[idx1], type_list[idx2]
 
-            # delta cost using caches
-            touched      = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
-            cost_before  = sum(net_hpwl_cache[n.net_id] for n in touched)
+            touched     = cell_to_nets[cell1.component_id] | cell_to_nets[cell2.component_id]
+            cost_before = sum(net_hpwl_cache[n.net_id] for n in touched)
 
-            # tentative swap in coords only
             x1, y1 = coords[cell1.component_id]
             x2, y2 = coords[cell2.component_id]
+            if (x1, y1) == (x2, y2):
+                continue
+
             coords[cell1.component_id] = (x2, y2)
             coords[cell2.component_id] = (x1, y1)
 
             cost_after = sum(hpwl_fast(n, coords) for n in touched)
             delta_cost = cost_after - cost_before
 
-            if delta_cost < 0 or random.random() < math.exp(-delta_cost / T):
-                #accept: commit to grid and update cache
-                swap(cell1, cell2, g)
+            if accept_move(delta_cost, T):
                 for n in touched:
                     net_hpwl_cache[n.net_id] = hpwl_fast(n, coords)
-                current_cost += delta_cost
+                current_cost  += delta_cost
                 accepted_moves += 1
+                step_accepted  += 1
             else:
-                #reject: revert coords dict only (no grid touch needed)
                 coords[cell1.component_id] = (x1, y1)
                 coords[cell2.component_id] = (x2, y2)
                 rejected_moves += 1
 
-        T *= CR
+        # ── cooling step ──────────────────────────────────────────────────
+        if nonlinear:
+            current_rate = step_accepted / num_moves
+            if current_rate > 0.65:
+                CR_dynamic = CR_min                         # liquid phase: cool fast
+            elif 0.35 <= current_rate <= 0.45:
+                CR_dynamic = min(0.999, CR_max + 0.04)     # sweet spot: cool very slow
+            elif 0.15 <= current_rate <= 0.65:
+                CR_dynamic = CR_max                         # critical phase: use provided CR
+            else:
+                CR_dynamic = (CR_max + CR_min) / 2.0       # frozen phase: medium speed
+            T *= CR_dynamic
+        else:
+            T *= CR
 
+    sync_coords_to_grid(g, coords)
     return initial_cost, current_cost, accepted_moves, rejected_moves
